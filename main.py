@@ -92,11 +92,11 @@ class App:
 
         st.session_state.subject_groups.clear()
         st.session_state.subject_groups.extend(df['subject_group'].unique().tolist())
-        st.session_state.subject_groups.sort
+        st.session_state.subject_groups.sort()
 
         st.session_state.organs.clear()
         st.session_state.organs.extend(df['sample_type'].unique().tolist())
-        st.session_state.organs.sort
+        st.session_state.organs.sort()
 
 
     def _extract_sample_data(self, json_data):
@@ -189,15 +189,16 @@ class App:
         
         
     def _update_plot(self):
-        self._tab1.empty()
-        with self._tab1:
-            self._plot_all_measurements()
-
-
-        self._tab2.empty()
-        with self._tab2:
-            df = self._get_filtered_data()
-            st.dataframe(df, height=600)
+        with st.spinner("Generating chart..."):
+            self._tab1.empty()
+            with self._tab1:
+                self._plot_all_measurements()
+    
+    
+            self._tab2.empty()
+            with self._tab2:
+                df = self._get_filtered_data()
+                st.dataframe(df, height=600)
 
     def _get_filtered_data(self):
         df = self._biods_experiments
@@ -262,7 +263,7 @@ class App:
          # Update layout
          fig.update_layout(
              title= title,
-             xaxis_title='Sample Type',
+             xaxis_title='Organ',
              yaxis_title=title,
              barmode='group',
              template='plotly_white',
