@@ -166,7 +166,7 @@ class App:
                 self._excluded_groups = st.multiselect("Excluded Groups", st.session_state.subject_groups, default=[], key='excluded_groups', on_change=self._update_plot)
 
                 # Excluded organ
-                self._excluded_organs = st.multiselect("Excluded Organs", st.session_state.organs, default=[], key='excluded_groups', on_change=self._update_plot)
+                self._excluded_organs = st.multiselect("Excluded Organs", st.session_state.organs, default=[], key='excluded_organs', on_change=self._update_plot)
                 
 
     def _init_main(self):
