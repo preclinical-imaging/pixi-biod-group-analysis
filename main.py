@@ -3,9 +3,11 @@ import streamlit as st
 import xnat
 import json
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+import base64
 from collections import defaultdict
+import plotly.figure_factory as ff
+import plotly.express as px
+import plotly.graph_objects as go
 
 css='''
 <style>
@@ -37,7 +39,7 @@ class App:
             raise Exception('Must be started from an XNAT project.')
         
         self._init_session_state()
-        self.__load_bioDExperiments()
+        self._load_bioDExperiments()
         self._init_ui()
     
     def _init_session_state(self):
@@ -212,125 +214,83 @@ class App:
 
         return df
     
+
+    def _create_error_bar_chart(self, field, title):
+         
+         # Convert to DataFrame
+         df = pd.DataFrame(self._get_filtered_data())
+         
+         # Filter out records with missing percent_injected_dose_per_organ
+         df = df.dropna(subset=[field, 'sample_type'])
+         
+         if df.empty:
+             st.error("No valid data found for " + field)
+             return
+         
+         # Calculate statistics by sample_type and subject_group
+         stats = df.groupby(['sample_type', 'subject_group'])[field].agg([
+             'mean', 
+             'std', 
+             'sem',  # standard error of mean
+             'count'
+         ]).reset_index()
+         
+         # Create the error bar chart
+         fig = go.Figure()
+         
+         # Get unique subject groups for different colors
+         subject_groups = stats['subject_group'].unique()
+         colors = px.colors.qualitative.Set1[:len(subject_groups)]
+         
+         for i, group in enumerate(subject_groups):
+             group_data = stats[stats['subject_group'] == group]
+             
+             fig.add_trace(go.Bar(
+                 name=group,
+                 x=group_data['sample_type'],
+                 y=group_data['mean'],
+                 error_y=dict(
+                     type='data',
+                     array=group_data['sem'],  # Using standard error
+                     visible=True
+                 ),
+                 marker_color=colors[i % len(colors)],
+                 text=[f'n={n}' for n in group_data['count']],
+                 textposition='outside'
+             ))
+         
+         # Update layout
+         fig.update_layout(
+             title= title,
+             xaxis_title='Sample Type',
+             yaxis_title=title,
+             barmode='group',
+             template='plotly_white',
+             showlegend=True,
+             legend=dict(title='Subject Group'),
+             height=600
+         )
+         
+         return fig
+     
     def _plot_all_measurements(self):
-        df = self._get_filtered_data()
+        tab1, tab2, tab3 = st.tabs(["Dose per Organ", "Dose per Gram", "Sample Weight"])
+        with tab1:
+           st.subheader("Percent Injected Dose per Organ")
+           fig1 = self._create_error_bar_chart('percent_injected_dose_per_organ', 'Percent Injected Dose per Organ by Organ')
+           if fig1:
+               st.plotly_chart(fig1, use_container_width=True)
+        with tab2:
+           st.subheader("Percent Injected Dose per Gram")
+           fig2 = self._create_error_bar_chart('percent_injected_dose_per_gram', 'Percent Injected Dose per Gram by Organ')
+           if fig2:
+               st.plotly_chart(fig2, use_container_width=True)
+        with tab3:
+           st.subheader('Sample Weight')
+           fig3 = self._create_error_bar_chart('sample_weight', 'Sample Weight')
+           if fig3:
+               st.plotly_chart(fig3, use_container_width=True)
+               
+          
 
-        fig = go.Figure()
-
-        # Line for each subject colored by group
-        colors = px.colors.qualitative.Plotly
-        for i, group in enumerate(df['group'].unique()):
-            group_df = df[df['group'] == group]
-            for subject in group_df['subject'].unique():
-                subject_df = group_df[group_df['subject'] == subject]
-                fig.add_trace(go.Scatter(x=subject_df['days'], y=subject_df['volume'], mode='lines+markers', name=subject, line=dict(color=colors[i]),
-                                         legendgroup=group, legendgrouptitle_text=group.capitalize()))
-
-        fig.update_layout(
-            height=600,
-            title='Tumor Volume vs Time for All Subjects',
-            xaxis_title='Time (days)',
-            yaxis_title='Tumor Volume (mm^3)',
-            legend_title='Subjects',
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-    def plot_error_bars_by_sample_type_and_group(self, dpi=300):
-        """
-        Create error bar plots for each metric by sample_type and study_group
-        
-        Parameters:
-        -----------
-        df : DataFrame
-            Input data
-        save_path : str, optional
-            Full path to save the plot (e.g., 'plots/error_bars.png')
-            If None, plot is displayed but not saved
-        save_format : str, default 'png'
-            File format for saving ('png', 'pdf', 'svg', 'jpg')
-        dpi : int, default 300
-            Resolution for saved image
-        """
-        
-        df = self._get_filtered_data()
-        
-        # Metrics to plot
-        metrics = [
-            ('percent_injected_dose_per_organ', '%ID/organ'),
-            ('percent_injected_dose_per_gram', '%ID/gram'), 
-            ('sample_weight', 'Sample Wt (g)')
-        ]
-        
-        # Create subplots
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        fig.suptitle('Biodistribution Data by Organ and Study Group', fontsize=16, fontweight='bold')
-        
-        for idx, (metric_col, metric_label) in enumerate(metrics):
-            ax = axes[idx]
-            
-            # Calculate statistics grouped by sample_type and subject_group
-            stats = df.groupby(['sample_type', 'subject_group'])[metric_col].agg(['mean', 'std']).reset_index()
-            
-            # Get unique sample types and study groups
-            sample_types = sorted(df['sample_type'].unique())
-            study_groups = sorted(df['subject_group'].unique())
-            
-            # Set up bar positions
-            x_pos = np.arange(len(sample_types))
-            width = 0.35
-            
-            # Plot bars for each study group
-            for i, group in enumerate(study_groups):
-                group_stats = stats[stats['subject_group'] == group]
-                
-                means = []
-                stds = []
-                
-                for sample_type in sample_types:
-                    sample_stats = group_stats[group_stats['sample_type'] == sample_type]
-                    if len(sample_stats) > 0:
-                        means.append(sample_stats['mean'].iloc[0])
-                        stds.append(sample_stats['std'].iloc[0] if not np.isnan(sample_stats['std'].iloc[0]) else 0)
-                    else:
-                        means.append(0)
-                        stds.append(0)
-                
-                # Plot bars with error bars
-                bars = ax.bar(x_pos + i * width, means, width, 
-                             yerr=stds, capsize=5, 
-                             label=group, alpha=0.8)
-                
-                # Add value labels on bars
-                for j, (bar, mean_val, std_val) in enumerate(zip(bars, means, stds)):
-                    if mean_val > 0:  # Only label non-zero bars
-                        height = bar.get_height()
-                        ax.text(bar.get_x() + bar.get_width()/2., height + std_val,
-                               f'{mean_val:.2f}', ha='center', va='bottom', fontsize=8)
-            
-            # Customize the plot
-            ax.set_xlabel('Organ')
-            ax.set_ylabel(metric_label)
-            ax.set_title(f'{metric_label} by Organ')
-            ax.set_xticks(x_pos + width/2)
-            ax.set_xticklabels(sample_types, rotation=45, ha='right')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        # Save the plot if path is provided
-        if save_path:
-            # Create directory if it doesn't exist
-            save_dir = os.path.dirname(save_path)
-            if save_dir and not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            
-            # Save with specified format and DPI
-            plt.savefig(save_path, format=save_format, dpi=dpi, bbox_inches='tight')
-            print(f"Plot saved to: {save_path}")
-        
-        plt.show()
-        return fig        
-        
 app = App()
